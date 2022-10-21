@@ -61,7 +61,7 @@ class SortedConv2D(tf.keras.layers.Layer):
         *_, n_channels = input_shape
 
         #####  BUILD Fa   ##### 
-        t = tf.repeat([tf.expand_dims(tf.linspace(0.0, 2.0*math.pi, self.filters, axis=0),axis=0)], n_channels, axis=1)
+        t = tf.repeat([tf.expand_dims(tf.linspace(math.pi/self.filters, math.pi, self.filters, axis=0),axis=0)], n_channels, axis=1)
 
         a = -tf.math.sqrt(8.0)*tf.math.cos(t - 9*math.pi/4)
         b = -2*tf.math.sin(t)
@@ -69,9 +69,9 @@ class SortedConv2D(tf.keras.layers.Layer):
         d = -2*tf.math.cos(t)
         
         self.scale = tf.Variable(1.0, trainable=True)
-        self.w_a   = tf.stack([tf.concat([a,b,c], axis=0) , 
+        self.w_a   = tf.Variable(initial_value = tf.stack([tf.concat([a,b,c], axis=0) , 
                                  tf.concat( [d,tf.zeros([1, n_channels, self.filters]), -d], axis=0),
-                                 tf.concat( [-c, -b, -a], axis=0)]) 
+                                 tf.concat( [-c, -b, -a], axis=0)]), trainable=True)
 
         #####  BUILD Fs   ##### 
         self.sym_param_a = tf.Variable(
@@ -99,8 +99,10 @@ class SortedConv2D(tf.keras.layers.Layer):
 
     def call(self, inputs, training=None):
 
-        x_a =  tf.nn.conv2d(inputs, filters= tf.math.scalar_mul(self.scale, self.w_a) , strides=self.strides, 
+        x_a =  tf.nn.conv2d(inputs, filters= self.w_a , strides=self.strides, 
                           padding=self.padding)
+
+        x_a = tf.math.scalar_mul(self.scale, x_a)
 
         self.w_s  = tf.stack([tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0), 
                               tf.concat([self.sym_param_b, self.sym_param_c, self.sym_param_b], axis=0),
@@ -111,5 +113,5 @@ class SortedConv2D(tf.keras.layers.Layer):
         if self.use_bias:
             x_s = x_s + self.bias
 
-        return tf.math.add(x_a , x_s)
+        return x_a+x_s
         
