@@ -27,6 +27,10 @@ class SortedConv2D(tf.keras.layers.Layer):
         self.padding = padding
         self.kernel_initializer = tf.keras.initializers.GlorotNormal(seed=5)
         self.param_initializer =tf.keras.initializers.GlorotNormal(seed=5)
+        
+        self.sym_initializer = tf.keras.initializers.RandomUniform(
+                                    minval=-0.05, maxval=2, seed=5
+                                )
 
         self.bias_initializer = tf.initializers.Zeros()
         self.strides = strides
@@ -71,7 +75,6 @@ class SortedConv2D(tf.keras.layers.Layer):
         c = -tf.math.sqrt(8.0)*tf.math.sin(t - 9*math.pi/4)
         d = -2*tf.math.cos(t)
         
-        #self.scale = tf.Variable(initial_value=self.param_initializer(shape=(1, self.filters), dtype='float32'), trainable=True) 
         #self.scale = tf.Variable(0.0, trainable=True)                  
         #tf.Variable(0.01, trainable=True)
         self.w_a =  tf.stack([tf.concat( [a,b,c], axis=0) , 
@@ -79,20 +82,25 @@ class SortedConv2D(tf.keras.layers.Layer):
                               tf.concat( [-c, -b, -a], axis=0)])
         #####  BUILD Fs   ##### 
         self.sym_param_a = tf.Variable(
-            initial_value=self.param_initializer(shape=(1,
+            initial_value=self.sym_initializer(shape=(1,
                                                         n_channels,
                                                         self.filters),
                                  dtype='float32'), trainable=True)
         self.sym_param_b = tf.Variable(
-            initial_value=self.param_initializer(shape=(1,
+            initial_value=self.sym_initializer(shape=(1,
                                                         n_channels,
                                                         self.filters),
                                  dtype='float32'), trainable=True)
         self.sym_param_c = tf.Variable(
-            initial_value=self.param_initializer(shape=(1,
+            initial_value=self.sym_initializer(shape=(1,
                                                         n_channels,
                                                         self.filters),
                                  dtype='float32'), trainable=True)
+
+        '''self.w_s  = tf.stack([tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0), 
+                                          tf.concat([self.sym_param_b, self.sym_param_c, self.sym_param_b], axis=0),
+                                          tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0)])'''
+
 
         if self.use_bias:
             self.bias = tf.Variable(
@@ -100,32 +108,50 @@ class SortedConv2D(tf.keras.layers.Layer):
                                                     dtype='float32'),
                 trainable=True)
 
+        self.scale_s = tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.param_initializer(shape=(3,3,
+                                                        n_channels,
+                                                        self.filters)))), trainable=True, name="scale_sym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
+
+        self.scale_a = tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.param_initializer(shape=(3,3,
+                                                        n_channels,
+                                                        self.filters)))), trainable=True, name="scale_asym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
+
 
     def call(self, inputs, training=None):
 
-        x_a =  tf.nn.conv2d(inputs, filters=  self.w_a , strides=self.strides, 
+        x_a =  tf.nn.conv2d(inputs, filters=  tf.math.scalar_mul(self.scale_a , self.w_a) , strides=self.strides, 
                           padding=self.padding)
         
-        self.w_s  = tf.stack([tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0), 
+        w_s  = tf.stack([tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0), 
                               tf.concat([self.sym_param_b, self.sym_param_c, self.sym_param_b], axis=0),
                               tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0)])
 
-        x_s =  tf.nn.conv2d(inputs, filters=self.w_s, strides=self.strides, 
-                          padding=self.padding)
-        '''if self.use_bias:
-            x_s = tf.math.add(x_s, self.bias)'''
+        '''x =  tf.nn.conv2d(inputs, filters=  tf.math.scalar_mul(self.scale , tf.math.add(self.w_a, w_s))  , strides=self.strides, 
+                          padding=self.padding)'''
 
+        x_s =  tf.nn.conv2d(inputs, filters=tf.math.scalar_mul(self.scale_s , w_s), strides=self.strides, 
+                          padding=self.padding)
+        x = tf.math.add(x_a , x_s)
+        if self.use_bias:
+            #x_s = x_s + self.bias
+            x = x+self.bias
         #self.map = tf.math.argmax(x_a, axis=-1)
 
-        x_s = self.activation(x_s)
+        #x_s = self.activation(x_s)
 
-        return  tf.math.add(x_a, x_s) #, self.map
+        return  self.activation(x)  #self.activation(tf.math.add(x_a, x_s)) #, self.map
         
     def get_scale(self):
         return self.scale
 
     def get_asym_filter(self, channel, filter):
         return self.w_a[:,:,channel,filter]
+    
+    def get_sym_filter(self, channel, filter):
+        ws = tf.stack([tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0), 
+                              tf.concat([self.sym_param_b, self.sym_param_c, self.sym_param_b], axis=0),
+                              tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0)])
+        return ws[:,:,channel,filter]
 
     def get_map(self):
         return self.map
