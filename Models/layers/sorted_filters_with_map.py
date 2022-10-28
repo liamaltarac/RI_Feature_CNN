@@ -1,3 +1,4 @@
+from re import X
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
@@ -145,22 +146,36 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
         if self.use_bias:
             #x_s = x_s + self.bias
             x = x+self.bias
-        #self.map = tf.math.argmax(x_a, axis=-1)
+        x = self.activation(x)
+        self.map = tf.math.argmax(x_a, axis=-1)
 
         #x_s = self.activation(x_s)
 
         # Build map of dominant orientataion
-        max_channels = tf.math.argmax(x_a, axis=-1)
-        '''print(max_channels.shape)
+        '''max_channels = tf.math.argmax(x_a, axis=-1)
+        max_channels  = tf.cast(max_channels, tf.float32)
+        averages = tf.nn.avg_pool2d((tf.expand_dims(max_channels, axis=-1)), ksize=[self.patch_size, self.patch_size] , strides=[self.patch_size, self.patch_size], padding='VALID')
+        map = tf.repeat(averages, repeats = self.patch_size, axis=1)
+        map = tf.repeat(map, repeats = self.patch_size, axis=2)
+        map  = tf.cast(map, tf.int64)
 
-        patches = self.extract_patches(max_channels) #, [1, self.k, self.k, 1],  [1, self.k, self.k, 1], rates = [1,1,1,1] , padding = 'VALID')
-        
-        print(patches.size)
-        
-        local_orientations = tf.math.reduce_mean(patches)'''
-        self.map =  max_channels #tf.repeat(local_orientations, repeats=[self.patch_size, self.patch_size])
+        print(x.shape)
+        x = tf.transpose(x)
+        print(x.shape)
 
-        return  self.activation(x), self.map  #self.activation(tf.math.add(x_a, x_s)) #, self.map
+        x = tf.reshape(x, [-1, x.shape[1]*x.shape[2], x.shape[3] ])
+        map = tf.reshape(map, [-1, map.shape[1]*map.shape[2]])
+        print(x.shape)
+        # Thanks lampuiho --> https://github.com/tensorflow/tensorflow/issues/43655
+        shifted = tf.map_fn(lambda t: tf.map_fn(lambda: tf.roll(t, map, -1)), x, fn_output_signature=tf.float32)
+
+        print('ok')'''
+
+        '''x = tf.compat.v1.layers.flatten(x)
+        map = tf.compat.v1.layers.flatten(map)
+        x = tf.roll()'''
+
+        return  x, self.map  #self.activation(tf.math.add(x_a, x_s)) #, self.map
         
     def get_scale(self):
         return self.scale
@@ -177,6 +192,15 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
     def get_map(self):
         return self.map
 
+
     def extract_patches(self, x):
         patches =  extract_image_patches(x, [1, self.patch_size, self.patch_size, 1],  [1, self.patch_size, self.patch_size, 1],  rates = [1,1,1,1] , padding = 'SAME')
-        return tf.reshape(patches, [1, self.patch_size, self.patch_size, x.shape[-1]])
+        return tf.reshape(patches, [-1, self.patch_size, self.patch_size, x.shape[-1]])
+    # Thanks to https://stackoverflow.com/questions/44047753/reconstructing-an-image-after-using-extract-image-patches
+    def extract_patches_inverse(self, x, y):
+        _x = tf.zeros_like(x)
+        _y = self.extract_patches(_x)
+        grad = tf.gradients(_y, _x)[0]
+        # Divide by grad, to "average" together the overlapping patches
+        # otherwise they would simply sum up
+        return tf.gradients(_y, _x, grad_ys=y)[0] / grad
