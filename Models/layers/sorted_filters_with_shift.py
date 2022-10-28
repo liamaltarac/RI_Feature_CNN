@@ -20,9 +20,9 @@ import math
 import matplotlib.pyplot as plt
 import sys 
 
-class SortedConv2DWithMap(tf.keras.layers.Layer):
+class SortedConv2DWithShift(tf.keras.layers.Layer):
     def __init__(self, filters, padding = 'VALID', strides = (1, 1), activation=None, use_bias = True, patch_size=4):
-        super(SortedConv2DWithMap, self).__init__()
+        super(SortedConv2DWithShift, self).__init__()
         self.filters = filters
         self.kernel_size = (3,3)
         self.activation = activation
@@ -142,41 +142,23 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
 
         x_s =   tf.nn.conv2d(inputs, filters=tf.math.multiply(self.scale_s, w_s) , strides=self.strides, 
                           padding=self.padding)
+
         x =  tf.math.add(x_a , x_s)
         if self.use_bias:
             #x_s = x_s + self.bias
             x = x+self.bias
+
         x = self.activation(x)
-        self.map = tf.math.argmax(x_a, axis=-1)
+        
+        #map = tf.math.argmax(x_a, axis=-1)
 
         #x_s = self.activation(x_s)
 
         # Build map of dominant orientataion
-        '''max_channels = tf.math.argmax(x_a, axis=-1)
-        max_channels  = tf.cast(max_channels, tf.float32)
-        averages = tf.nn.avg_pool2d((tf.expand_dims(max_channels, axis=-1)), ksize=[self.patch_size, self.patch_size] , strides=[self.patch_size, self.patch_size], padding='VALID')
-        map = tf.repeat(averages, repeats = self.patch_size, axis=1)
-        map = tf.repeat(map, repeats = self.patch_size, axis=2)
-        map  = tf.cast(map, tf.int64)
-
-        print(x.shape)
-        x = tf.transpose(x)
-        print(x.shape)
-
-        x = tf.reshape(x, [-1, x.shape[1]*x.shape[2], x.shape[3] ])
-        map = tf.reshape(map, [-1, map.shape[1]*map.shape[2]])
-        print(x.shape)
-        # Thanks lampuiho --> https://github.com/tensorflow/tensorflow/issues/43655
-        shifted = tf.map_fn(lambda t: tf.map_fn(lambda: tf.roll(t, map, -1)), x, fn_output_signature=tf.float32)
-
-        print('ok')'''
-
-        '''x = tf.compat.v1.layers.flatten(x)
-        map = tf.compat.v1.layers.flatten(map)
-        x = tf.roll()'''
-
-        return  x, self.map  #self.activation(tf.math.add(x_a, x_s)) #, self.map
+        shifted, map = self.shift_to_max(x, x_a)
+        return  x,  shifted  #self.activation(tf.math.add(x_a, x_s)) #, self.map
         
+
     def get_scale(self):
         return self.scale
 
@@ -185,22 +167,64 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
     
     def get_sym_filter(self, channel, filter):
         ws = tf.stack([tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0), 
-                              tf.concat([self.sym_param_b, self.sym_param_c, self.sym_param_b], axis=0),
-                              tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0)])
+                       tf.concat([self.sym_param_b, self.sym_param_c, self.sym_param_b], axis=0),
+                       tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0)])
         return ws[:,:,channel,filter]
 
     def get_map(self):
         return self.map
 
+    def roll(self, x, map):
+        def roll_fn(args):
 
-    def extract_patches(self, x):
-        patches =  extract_image_patches(x, [1, self.patch_size, self.patch_size, 1],  [1, self.patch_size, self.patch_size, 1],  rates = [1,1,1,1] , padding = 'SAME')
-        return tf.reshape(patches, [-1, self.patch_size, self.patch_size, x.shape[-1]])
-    # Thanks to https://stackoverflow.com/questions/44047753/reconstructing-an-image-after-using-extract-image-patches
-    def extract_patches_inverse(self, x, y):
-        _x = tf.zeros_like(x)
-        _y = self.extract_patches(_x)
-        grad = tf.gradients(_y, _x)[0]
-        # Divide by grad, to "average" together the overlapping patches
-        # otherwise they would simply sum up
-        return tf.gradients(_y, _x, grad_ys=y)[0] / grad
+            x, map = args
+            print(tf.executing_eagerly())
+            out = tf.zeros([x.shape[0], x.shape[1], x.shape[2], x.shape[3]])
+
+            print("000")
+            print
+            for i in range(x.shape[1]):
+                for j in range(x.shape[2]):
+                    print("pppp")
+                    out[i,j] = tf.roll(x[i,j], shift=map[i,j], axis=-1)
+            return out
+        print("doing")
+        return tf.map_fn(roll_fn, (x, map))
+
+        #shifted = tf.TensorArray(tf.float32, size=map.shape[-1], dynamic_size=False, infer_shape=True)
+        '''print('here', map.shape)
+        print('here', x.shape)
+
+        for i in range(map.shape[-1]):
+
+            tf.autograph.experimental.set_loop_options(
+                shape_invariants=[(x, tf.TensorShape([None, None, None, None]))]
+            )
+            tmp = tf.roll(x[i], shift=map[i], axis=-1)
+            #print(x[i], tmp)
+            shifted = shifted.write(i, tmp)  # shape is (n_atoms, n_timesteps, n_atoms, n_atoms)
+        out = shifted.stack()
+        print("done")'''
+        print("111")
+        return x
+
+    @tf.function
+    def shift_to_max(self, x, x_a):
+        max_channels = tf.math.argmax(x_a, axis=-1)
+        max_channels  = tf.cast(max_channels, tf.float32)
+        averages = tf.nn.avg_pool2d((tf.expand_dims(max_channels, axis=-1)), ksize=[self.patch_size, self.patch_size] , strides=[self.patch_size, self.patch_size], padding='SAME')
+        map = tf.repeat(averages, repeats = self.patch_size, axis=1)
+        map = tf.repeat(map, repeats = self.patch_size, axis=2)
+        map  = tf.cast(map, tf.int32)
+
+        '''out = tf.reshape(x, [-1, x.shape[1]*x.shape[2], x.shape[3] ])
+        map = tf.reshape(map, [-1, map.shape[1]*map.shape[2]])'''
+        print("here")
+        # Thanks lampuiho --> https://github.com/tensorflow/tensorflow/issues/43655
+        shifted = self.roll(x, -1*map)
+        print("244")
+
+        print("2")
+        return shifted, map
+
+
