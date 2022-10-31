@@ -56,8 +56,15 @@ class SortedConv2DWithShift(tf.keras.layers.Layer):
         self.scale = None
 
         self.map = None
-
         self.patch_size = patch_size
+
+        self.batch_size = None
+        self.image_h = None
+        self.image_w = None
+
+        self.channel_size = None
+
+        self.num_patches = None
 
     def get_config(self):
         config = super().get_config()
@@ -76,6 +83,15 @@ class SortedConv2DWithShift(tf.keras.layers.Layer):
 
     def build(self, input_shape):
         *_, n_channels = input_shape
+
+        self.batch_size = input_shape[0]
+        self.image_h = input_shape[1]
+        self.image_w = input_shape[2]
+
+        self.channel_size = self.filters
+
+        self.num_patches = int((self.image_h * self.image_w ) / (self.patch_size * self.patch_size))
+
 
         #####  BUILD Fa   ##### 
         t = tf.repeat([tf.expand_dims(tf.linspace(0.0, math.pi, self.filters, axis=0),axis=0)], n_channels, axis=1)
@@ -150,13 +166,26 @@ class SortedConv2DWithShift(tf.keras.layers.Layer):
 
         x = self.activation(x)
         
-        #map = tf.math.argmax(x_a, axis=-1)
+        map = tf.math.argmax(x_a, axis=-1)
+        map  = tf.cast(map, tf.float32)
+        map = tf.nn.avg_pool2d((tf.expand_dims(map, axis=-1)), ksize=[self.patch_size, self.patch_size] , strides=[self.patch_size, self.patch_size], padding='VALID')
+        map  = tf.cast(map, tf.int32)
+
+
+        x = tf.reshape(x, [-1, self.image_h*self.image_w, self.channel_size ])
+        m = tf.reshape(map, [-1, map.shape[1]*map.shape[2]])
 
         #x_s = self.activation(x_s)
 
         # Build map of dominant orientataion
-        shifted, map = self.shift_to_max(x, x_a)
-        return  x,  shifted  #self.activation(tf.math.add(x_a, x_s)) #, self.map
+        #shifted, map = self.shift_to_max(x, x_a)
+
+        out = tf.vectorized_map(self.n_roll, (x, -m), fallback_to_while_loop=False, warn=True)
+        print('out shape', x.shape)
+        out = tf.reshape(out, [-1, self.image_h, self.image_w, self.channel_size ])
+
+
+        return  x, m  #self.activation(tf.math.add(x_a, x_s)) #, self.map
         
 
     def get_scale(self):
@@ -208,23 +237,18 @@ class SortedConv2DWithShift(tf.keras.layers.Layer):
         print("111")
         return x
 
-    @tf.function
-    def shift_to_max(self, x, x_a):
-        max_channels = tf.math.argmax(x_a, axis=-1)
-        max_channels  = tf.cast(max_channels, tf.float32)
-        averages = tf.nn.avg_pool2d((tf.expand_dims(max_channels, axis=-1)), ksize=[self.patch_size, self.patch_size] , strides=[self.patch_size, self.patch_size], padding='SAME')
-        map = tf.repeat(averages, repeats = self.patch_size, axis=1)
-        map = tf.repeat(map, repeats = self.patch_size, axis=2)
-        map  = tf.cast(map, tf.int32)
+    def n_roll(self,  arg):
+        x, map = arg
+        shifted = tf.zeros([0, self.channel_size]) #tf.TensorArray(tf.float32, size=40, dynamic_size=False)
+        for i in range(self.num_patches):
+            print(i)
+            k = map[i] % self.channel_size 
+            shifted = tf.concat([shifted, tf.concat(
+                                                [tf.slice(x, [i*self.patch_size*self.patch_size, self.channel_size-k], [self.patch_size*self.patch_size, k]),
+                                                 tf.slice(x, [i*self.patch_size*self.patch_size, 0], [self.patch_size*self.patch_size, self.channel_size-k])], 
+                                           1)],
+                                 0)
+        return shifted
 
-        '''out = tf.reshape(x, [-1, x.shape[1]*x.shape[2], x.shape[3] ])
-        map = tf.reshape(map, [-1, map.shape[1]*map.shape[2]])'''
-        print("here")
-        # Thanks lampuiho --> https://github.com/tensorflow/tensorflow/issues/43655
-        shifted = self.roll(x, -1*map)
-        print("244")
-
-        print("2")
-        return shifted, map
 
 
