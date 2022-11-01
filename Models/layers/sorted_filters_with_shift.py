@@ -167,25 +167,39 @@ class SortedConv2DWithShift(tf.keras.layers.Layer):
         x = self.activation(x)
         
         map = tf.math.argmax(x_a, axis=-1)
-        map  = tf.cast(map, tf.float32)
-        map = tf.nn.avg_pool2d((tf.expand_dims(map, axis=-1)), ksize=[self.patch_size, self.patch_size] , strides=[self.patch_size, self.patch_size], padding='VALID')
-        map  = tf.cast(map, tf.int32)
+        '''map  = tf.cast(map, tf.float32)
+        map = tf.nn.avg_pool2d((tf.expand_dims(map, axis=-1)), ksize=[self.patch_size, self.patch_size] , strides=[self.patch_size, self.patch_size], padding='SAME')
+        map  = tf.cast(map, tf.int64)
+
+        map = tf.repeat(map, repeats = self.patch_size, axis=1)
+        map = tf.repeat(map, repeats = self.patch_size, axis=2)
+        map = tf.reshape(map, [-1, tf.shape(map)[0]*map.shape[1]*map.shape[2]])
 
 
-        x = tf.reshape(x, [-1, self.image_h*self.image_w, self.channel_size ])
-        m = tf.reshape(map, [-1, map.shape[1]*map.shape[2]])
+
+        x_shifted = tf.reshape(x, [-1, tf.shape(x)[0]* x.shape[1]*x.shape[2], x.shape[3] ])
+
+
+        x_shifted = self.n_roll([x_shifted, -map])'''
+        '''x_shifted = tf.map_fn(self.n_roll , (x_shifted, -map), fn_output_signature = x_shifted.dtype,
+                              back_prop=True,
+                              swap_memory=False,)'''
+        
+        #print('xs : ', x_shifted.shape)
+
+        #x_shifted = tf.reshape(x_shifted, [-1, x.shape[1], x.shape[2], x.shape[3]])
 
         #x_s = self.activation(x_s)
 
         # Build map of dominant orientataion
         #shifted, map = self.shift_to_max(x, x_a)
 
-        out = tf.vectorized_map(self.n_roll, (x, -m), fallback_to_while_loop=False, warn=True)
+        '''
         print('out shape', x.shape)
-        out = tf.reshape(out, [-1, self.image_h, self.image_w, self.channel_size ])
+        out = tf.reshape(out, [-1, self.image_h, self.image_w, self.channel_size ])'''
 
 
-        return  x, m  #self.activation(tf.math.add(x_a, x_s)) #, self.map
+        return  x, map #self.activation(tf.math.add(x_a, x_s)) #, self.map
         
 
     def get_scale(self):
@@ -218,7 +232,7 @@ class SortedConv2DWithShift(tf.keras.layers.Layer):
                     out[i,j] = tf.roll(x[i,j], shift=map[i,j], axis=-1)
             return out
         print("doing")
-        return tf.map_fn(roll_fn, (x, map))
+        return tf.map_fn(roll_fn, (x, map), )
 
         #shifted = tf.TensorArray(tf.float32, size=map.shape[-1], dynamic_size=False, infer_shape=True)
         '''print('here', map.shape)
@@ -237,18 +251,18 @@ class SortedConv2DWithShift(tf.keras.layers.Layer):
         print("111")
         return x
 
+
     def n_roll(self,  arg):
-        x, map = arg
-        shifted = tf.zeros([0, self.channel_size]) #tf.TensorArray(tf.float32, size=40, dynamic_size=False)
-        for i in range(self.num_patches):
-            print(i)
-            k = map[i] % self.channel_size 
-            shifted = tf.concat([shifted, tf.concat(
-                                                [tf.slice(x, [i*self.patch_size*self.patch_size, self.channel_size-k], [self.patch_size*self.patch_size, k]),
-                                                 tf.slice(x, [i*self.patch_size*self.patch_size, 0], [self.patch_size*self.patch_size, self.channel_size-k])], 
-                                           1)],
-                                 0)
-        return shifted
+        x , map = arg
+        print('map _shape ', map.shape)
 
-
-
+        i0 = tf.constant(0)
+        out0 = tf.TensorArray(dtype=tf.float32, size=0 , dynamic_size=True ,element_shape = tf.TensorShape([1, x.shape[-1]]) )
+        
+        c = lambda i, out: i < map.shape[0]
+        b = lambda i, out: [i+1, out.write(i, tf.expand_dims(tf.roll(x[i], map[i], axis=-1), axis=0))]
+        #print('here', map[0].getitem, x.shape)
+        i,  output = tf.while_loop(c, b, [i0, out0])
+        output = output.stack()
+        print('done')
+        return output
