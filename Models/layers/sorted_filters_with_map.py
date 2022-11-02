@@ -20,9 +20,9 @@ import math
 import matplotlib.pyplot as plt
 import sys 
 
-class SortedConv2DWithShift(tf.keras.layers.Layer):
+class SortedConv2DWithMap(tf.keras.layers.Layer):
     def __init__(self, filters, padding = 'VALID', strides = (1, 1), activation=None, use_bias = True, patch_size=4):
-        super(SortedConv2DWithShift, self).__init__()
+        super(SortedConv2DWithMap, self).__init__()
         self.filters = filters
         self.kernel_size = (3,3)
         self.activation = activation
@@ -167,13 +167,14 @@ class SortedConv2DWithShift(tf.keras.layers.Layer):
         x = self.activation(x)
         
         map = tf.math.argmax(x_a, axis=-1)
+        map = tf.expand_dims(map, axis=-1)
         map  = tf.cast(map, tf.float32)
         map = tf.nn.avg_pool2d((tf.expand_dims(map, axis=-1)), ksize=[self.patch_size, self.patch_size] , strides=[self.patch_size, self.patch_size], padding='SAME')
 
         map = tf.repeat(map, repeats = self.patch_size, axis=1)
         map = tf.repeat(map, repeats = self.patch_size, axis=2)
 
-        map  = tf.cast(map, tf.int64)
+        '''map  = tf.cast(map, tf.int64)
 
         index = tf.squeeze(tf.sequence_mask(map, self.filters), axis=-2)
         index = tf.math.logical_not(index)
@@ -182,7 +183,7 @@ class SortedConv2DWithShift(tf.keras.layers.Layer):
         index = tf.math.logical_not(index)
         out_right = tf.ragged.boolean_mask(x, index)
 
-        out_shifted = tf.concat([out_left, out_right], axis=-1)
+        out_shifted = tf.concat([out_left, out_right], axis=-1)''''''
         
         #print('xs : ', x_shifted.shape)
 
@@ -194,11 +195,11 @@ class SortedConv2DWithShift(tf.keras.layers.Layer):
         #shifted, map = self.shift_to_max(x, x_a)
 
         '''
-        print('out shape', x.shape)
+        '''print('out shape', x.shape)
         out = tf.reshape(out, [-1, self.image_h, self.image_w, self.channel_size ])'''
 
 
-        return  x, out_shifted.to_tensor(shape=[x.shape[0], x.shape[1], x.shape[2], x.shape[3]]) #self.activation(tf.math.add(x_a, x_s)) #, self.map
+        return  x, map # out_shifted.to_tensor(shape=[x.shape[0], x.shape[1], x.shape[2], x.shape[3]]) #self.activation(tf.math.add(x_a, x_s)) #, self.map
         
 
     def get_scale(self):
