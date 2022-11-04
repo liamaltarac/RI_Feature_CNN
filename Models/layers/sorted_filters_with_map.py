@@ -84,17 +84,18 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
     def build(self, input_shape):
         *_, n_channels = input_shape
 
-        self.batch_size = input_shape[0]
+        '''self.batch_size = input_shape[0]
         self.image_h = input_shape[1]
-        self.image_w = input_shape[2]
+        self.image_w = input_shape[2]'''
 
         self.channel_size = self.filters
 
-        self.num_patches = int((self.image_h * self.image_w ) / (self.patch_size * self.patch_size))
 
+        print( self.filters)
 
         #####  BUILD Fa   ##### 
         t = tf.repeat([tf.expand_dims(tf.linspace(0.0, math.pi, self.filters, axis=0),axis=0)], n_channels, axis=1)
+
         #t = tf.repeat([tf.expand_dims(tf.repeat(tf.linspace(0.0, 2.0*math.pi, 8, axis=0), self.filters//8, axis=0),axis=0)], n_channels, axis=1)
 
         a = -tf.math.sqrt(8.0)*tf.math.cos(t - 9*math.pi/4)
@@ -135,8 +136,8 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
                                                     dtype='float32'),
                 trainable=True, name="bias" )
 
-        self.scale_s = tf.Variable(initial_value=self.sym_initializer(shape=(1,)), trainable=True, name="scale_sym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
-        self.scale_a = tf.Variable(initial_value=self.asym_initializer(shape=(1,)), trainable=True, name="scale_asym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
+        self.scale_s = tf.Variable(initial_value=self.sym_initializer(shape=(1, 1, 1, self.filters)), trainable=True, name="scale_sym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
+        self.scale_a = tf.Variable(initial_value=self.asym_initializer(shape=(1,1,1, self.filters)), trainable=True, name="scale_asym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
             
         #self.scale_a = tf.Variable(self.gain_initializer(shape=(1,)), trainable=True, name="scale_asym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
      
@@ -146,7 +147,8 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
 
     def call(self, inputs, training=None):
 
-        x_a =   tf.nn.conv2d(inputs, filters=tf.math.multiply(self.scale_a,self.w_a) , strides=self.strides, 
+
+        x_a =   tf.nn.conv2d(inputs, filters= self.w_a , strides=self.strides, 
                           padding=self.padding)
         
         w_s  = tf.stack([tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0), 
@@ -156,10 +158,10 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
         '''x =  tf.nn.conv2d(inputs, filters=  tf.math.scalar_mul(self.scale , tf.math.add(self.w_a, w_s))  , strides=self.strides, 
                           padding=self.padding)'''
 
-        x_s =   tf.nn.conv2d(inputs, filters=tf.math.multiply(self.scale_s, w_s) , strides=self.strides, 
+        x_s =  tf.nn.conv2d(inputs, filters= w_s , strides=self.strides, 
                           padding=self.padding)
 
-        x =  tf.math.add(x_a , x_s)
+        x =  tf.math.add(  tf.math.multiply(self.scale_a, x_a ),  tf.math.multiply(self.scale_s, x_s))
         if self.use_bias:
             #x_s = x_s + self.bias
             x = x+self.bias
@@ -167,7 +169,7 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
         x = self.activation(x)
         
         map = tf.math.argmax(x_a, axis=-1)
-        map = tf.expand_dims(map, axis=-1)
+        #map = tf.expand_dims(map, axis=-1)
         map  = tf.cast(map, tf.float32)
         map = tf.nn.avg_pool2d((tf.expand_dims(map, axis=-1)), ksize=[self.patch_size, self.patch_size] , strides=[self.patch_size, self.patch_size], padding='SAME')
 
@@ -217,52 +219,5 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
     def get_map(self):
         return self.map
 
-    def roll(self, x, map):
-        def roll_fn(args):
-
-            x, map = args
-            print(tf.executing_eagerly())
-            out = tf.zeros([x.shape[0], x.shape[1], x.shape[2], x.shape[3]])
-
-            print("000")
-            print
-            for i in range(x.shape[1]):
-                for j in range(x.shape[2]):
-                    print("pppp")
-                    out[i,j] = tf.roll(x[i,j], shift=map[i,j], axis=-1)
-            return out
-        print("doing")
-        return tf.map_fn(roll_fn, (x, map), )
-
-        #shifted = tf.TensorArray(tf.float32, size=map.shape[-1], dynamic_size=False, infer_shape=True)
-        '''print('here', map.shape)
-        print('here', x.shape)
-
-        for i in range(map.shape[-1]):
-
-            tf.autograph.experimental.set_loop_options(
-                shape_invariants=[(x, tf.TensorShape([None, None, None, None]))]
-            )
-            tmp = tf.roll(x[i], shift=map[i], axis=-1)
-            #print(x[i], tmp)
-            shifted = shifted.write(i, tmp)  # shape is (n_atoms, n_timesteps, n_atoms, n_atoms)
-        out = shifted.stack()
-        print("done")'''
-        print("111")
-        return x
 
 
-    def n_roll(self,  arg):
-        x , map = arg
-        print('map _shape ', map.shape)
-
-        i0 = tf.constant(0)
-        out0 = tf.TensorArray(dtype=tf.float32, size=0 , dynamic_size=True ,element_shape = tf.TensorShape([1, x.shape[-1]]) )
-        
-        c = lambda i, out: i < map.shape[0]
-        b = lambda i, out: [i+1, out.write(i, tf.expand_dims(tf.roll(x[i], map[i], axis=-1), axis=0))]
-        #print('here', map[0].getitem, x.shape)
-        i,  output = tf.while_loop(c, b, [i0, out0])
-        output = output.stack()
-        print('done')
-        return output
