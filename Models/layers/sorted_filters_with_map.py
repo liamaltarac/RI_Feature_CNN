@@ -94,8 +94,8 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
         print( self.filters)
 
         #####  BUILD Fa   ##### 
-        t = tf.repeat([tf.expand_dims(tf.linspace(0.0, math.pi, self.filters, axis=0),axis=0)], n_channels, axis=1)
-
+        t = tf.roll(tf.repeat([tf.expand_dims(tf.linspace(0.0, math.pi, self.filters, axis=0),axis=0)], n_channels, axis=1), shift=tf.random.uniform(shape = [1], minval=0, maxval=self.filters,  dtype=tf.int32), axis=[-1]) 
+        print(t)
         #t = tf.repeat([tf.expand_dims(tf.repeat(tf.linspace(0.0, 2.0*math.pi, 8, axis=0), self.filters//8, axis=0),axis=0)], n_channels, axis=1)
 
         a = -tf.math.sqrt(8.0)*tf.math.cos(t - 9*math.pi/4)
