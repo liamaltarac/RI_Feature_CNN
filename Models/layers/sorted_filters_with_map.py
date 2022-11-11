@@ -94,7 +94,7 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
         print( self.filters)
 
         #####  BUILD Fa   ##### 
-        t = tf.roll(tf.repeat([tf.expand_dims(tf.linspace(0.0, math.pi, self.filters, axis=0),axis=0)], n_channels, axis=1), shift=tf.random.uniform(shape = [1], minval=0, maxval=self.filters,  dtype=tf.int32), axis=[-1]) 
+        t = tf.repeat([tf.expand_dims(tf.linspace(0.0, math.pi, self.filters, axis=0),axis=0)], n_channels, axis=1)
         print(t)
         #t = tf.repeat([tf.expand_dims(tf.repeat(tf.linspace(0.0, 2.0*math.pi, 8, axis=0), self.filters//8, axis=0),axis=0)], n_channels, axis=1)
 
@@ -136,8 +136,8 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
                                                     dtype='float32'),
                 trainable=True, name="bias" )
 
-        self.scale_s = tf.Variable(initial_value=self.sym_initializer(shape=(1, 1, 1, self.filters)), trainable=True, name="scale_sym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
-        self.scale_a = tf.Variable(initial_value=self.asym_initializer(shape=(1,1,1, self.filters)), trainable=True, name="scale_asym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
+        #self.scale_s = tf.Variable(initial_value=self.sym_initializer(shape=(1, 1, 1, self.filters)), trainable=True, name="scale_sym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
+        self.scale_a = tf.Variable(initial_value=self.asym_initializer(shape=(1,1,1, 1)), trainable=True, name="scale_asym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
             
         #self.scale_a = tf.Variable(self.gain_initializer(shape=(1,)), trainable=True, name="scale_asym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
      
@@ -148,7 +148,7 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
     def call(self, inputs, training=None):
 
 
-        x_a =   tf.nn.conv2d(inputs, filters= self.w_a , strides=self.strides, 
+        x_a =   tf.nn.conv2d(inputs, filters=  self.w_a  , strides=self.strides, 
                           padding=self.padding)
         
         w_s  = tf.stack([tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0), 
@@ -158,17 +158,17 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
         '''x =  tf.nn.conv2d(inputs, filters=  tf.math.scalar_mul(self.scale , tf.math.add(self.w_a, w_s))  , strides=self.strides, 
                           padding=self.padding)'''
 
-        x_s =  tf.nn.conv2d(inputs, filters= w_s , strides=self.strides, 
+        x_s =  tf.nn.conv2d(inputs, filters=   w_s , strides=self.strides, 
                           padding=self.padding)
 
-        x =  tf.math.add(  tf.math.multiply(self.scale_a, x_a ),  tf.math.multiply(self.scale_s, x_s))
+        x =  tf.math.add( x_a, x_s)
         if self.use_bias:
             #x_s = x_s + self.bias
             x = x+self.bias
 
         x = self.activation(x)
         
-        map = tf.math.argmax(x_a, axis=-1)
+        map = tf.math.argmax(tf.math.divide(x_a, self.scale_a ), axis=-1)
         #map = tf.expand_dims(map, axis=-1)
         map  = tf.cast(map, tf.float32)
         map = tf.nn.avg_pool2d((tf.expand_dims(map, axis=-1)), ksize=[self.patch_size, self.patch_size] , strides=[self.patch_size, self.patch_size], padding='SAME')
