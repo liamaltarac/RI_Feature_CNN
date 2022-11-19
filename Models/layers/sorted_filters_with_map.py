@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import sys 
 
 class SortedConv2DWithMap(tf.keras.layers.Layer):
-    def __init__(self, filters, padding = 'VALID', strides = (1, 1), activation=None, use_bias = True, patch_size=4):
+    def __init__(self, filters, layer_num, padding = 'VALID', strides = (1, 1), activation=None, use_bias = True, patch_size=4):
         super(SortedConv2DWithMap, self).__init__()
         self.filters = filters
         self.kernel_size = (3,3)
@@ -65,7 +65,7 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
         self.channel_size = None
 
         self.num_patches = None
-
+        self.layer_num = layer_num
     def get_config(self):
         config = super().get_config()
         config.update({
@@ -75,6 +75,7 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
             "activation": self.activation,
             "use_bias": self.use_bias,
             "patch_size": self.patch_size,
+            "layer_num": self.layer_num
         })
         return config
 
@@ -91,11 +92,12 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
         self.channel_size = self.filters
 
 
-        print( self.filters)
+        #print( self.filters)
 
         #####  BUILD Fa   ##### 
-        t = tf.repeat([tf.expand_dims(tf.linspace(0.0, math.pi, self.filters, axis=0),axis=0)], n_channels, axis=1)
-        print(t)
+        t = tf.random.normal([1, n_channels, self.filters], mean=tf.linspace(0.0, 2* math.pi,  self.filters, axis=0), stddev=self.layer_num/(math.pi**2))
+        #t = tf.repeat([tf.expand_dims(tf.linspace(0.0, math.pi, self.filters, axis=0),axis=0)], n_channels, axis=1)
+        #print(t)
         #t = tf.repeat([tf.expand_dims(tf.repeat(tf.linspace(0.0, 2.0*math.pi, 8, axis=0), self.filters//8, axis=0),axis=0)], n_channels, axis=1)
 
         a = -tf.math.sqrt(8.0)*tf.math.cos(t - 9*math.pi/4)
@@ -137,9 +139,9 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
                 trainable=True, name="bias" )
 
         #self.scale_s = tf.Variable(initial_value=self.sym_initializer(shape=(1, 1, 1, self.filters)), trainable=True, name="scale_sym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
-        self.scale_a = tf.Variable(initial_value=self.asym_initializer(shape=(1,1,1, 1)), trainable=True, name="scale_asym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
+        #self.scale_a = tf.Variable(initial_value=self.asym_initializer(shape=(1,1,1, 1)), trainable=True, name="scale_asym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
             
-        #self.scale_a = tf.Variable(self.gain_initializer(shape=(1,)), trainable=True, name="scale_asym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
+        self.scale_a = tf.Variable(self.gain_initializer(shape=(1,)), trainable=True, name="scale_asym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
      
 
         #self.gain = tf.Variable(initial_value=self.gain_initializer(shape=(self.filters,)), trainable=True, name="gain")
@@ -148,7 +150,7 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
     def call(self, inputs, training=None):
 
 
-        x_a =   tf.nn.conv2d(inputs, filters=  self.w_a  , strides=self.strides, 
+        x_a =   tf.nn.conv2d(inputs, filters=   self.scale_a * self.w_a  , strides=self.strides, 
                           padding=self.padding)
         
         w_s  = tf.stack([tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0), 
@@ -168,7 +170,7 @@ class SortedConv2DWithMap(tf.keras.layers.Layer):
 
         x = self.activation(x)
         
-        map = tf.math.argmax(tf.math.divide(x_a, self.scale_a ), axis=-1)
+        map = tf.math.argmax(x_a, axis=-1)
         #map = tf.expand_dims(map, axis=-1)
         map  = tf.cast(map, tf.float32)
         map = tf.nn.avg_pool2d((tf.expand_dims(map, axis=-1)), ksize=[self.patch_size, self.patch_size] , strides=[self.patch_size, self.patch_size], padding='SAME')
