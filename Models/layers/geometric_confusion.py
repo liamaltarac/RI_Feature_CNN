@@ -10,11 +10,12 @@ from tensorflow.compat.v2.math import mod
 import sys 
 
 class GConfusion(tf.keras.layers.Layer):
-    def __init__(self, patch_size, stddev):
+    def __init__(self, patch_size, prob, max):
         super(GConfusion, self).__init__(trainable= False)
 
         self.patch_size = patch_size
-        self.stddev = stddev
+        self.prob = prob
+        self.max  = max
 
 
     def get_config(self):
@@ -29,20 +30,27 @@ class GConfusion(tf.keras.layers.Layer):
     def call(self, inputs, training=None):
         
         x = inputs
+        filters =  tf.cast(x.shape[-1], tf.int32)
+
         map_shape = [tf.shape(x)[0], int(x.shape[1]/self.patch_size), int(x.shape[2]/self.patch_size), 1]
-        map = tf.math.abs(tf.random.normal(
-            map_shape,
-            mean=0.0,
-            stddev=self.stddev,
-            dtype=tf.dtypes.float32,
-            seed=None,
-            name=None
-        ))
-        map = tf.repeat(map, repeats = self.patch_size, axis=1)
-        map = tf.repeat(map, repeats = self.patch_size, axis=2)
+        mask_shape = [tf.shape(x)[0], int(x.shape[1]), int(x.shape[2]), 1]
+
+        mask =  tf.cast(tf.random.uniform(
+            shape = mask_shape,
+            minval = 0.0,
+            maxval = 1.0
+        ) > self.prob , tf.int32)
+        
+        map =  tf.random.uniform(
+            shape = map_shape,
+            minval = 0.0,
+            maxval = self.max,
+        )
         map  = tf.cast(map, tf.int32) 
 
-        filters =  tf.cast(x.shape[-1], tf.int32)
+        map = tf.repeat(map, repeats = self.patch_size, axis=1)
+        map = tf.repeat(map, repeats = self.patch_size, axis=2)
+        map *= mask
 
 
         indicies = tf.cast(tf.ensure_shape(tf.linspace(tf.squeeze(map, -1), tf.squeeze(map + filters-1, -1), filters, axis=-1), x.shape) , tf.int32)

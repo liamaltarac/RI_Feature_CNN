@@ -28,8 +28,8 @@ class SortedConv2D(tf.keras.layers.Layer):
         self.kernel_initializer = tf.keras.initializers.GlorotNormal(seed=5)
         self.param_initializer =tf.keras.initializers.GlorotNormal(seed=5)
         
-        self.sym_initializer = tf.keras.initializers.RandomUniform(
-                                    minval=-2, maxval=0.1, seed=5
+        self.sym_initializer = tf.keras.initializers.GlorotNormal(
+                                    seed=5
                                 )
         self.asym_initializer = tf.keras.initializers.RandomUniform(
                                     minval=-0.5, maxval=0.5, seed=5
@@ -75,13 +75,15 @@ class SortedConv2D(tf.keras.layers.Layer):
 
         #####  BUILD Fa   ##### 
         #t = tf.random.normal([1, n_channels, self.filters], mean=tf.linspace(0.0, 2* math.pi,  self.filters, axis=0), stddev=100)
-        t = tf.repeat([tf.expand_dims(tf.linspace(0.0, 2*math.pi, self.filters, axis=0),axis=0)], n_channels, axis=1)
 
-        a = -tf.math.sqrt(8.0)*tf.math.cos(t - 9*math.pi/4)
-        b = -2*tf.math.sin(t)
-        c = -tf.math.sqrt(8.0)*tf.math.sin(t - 9*math.pi/4)
-        d = -2*tf.math.cos(t)
-        
+        t = tf.repeat([tf.expand_dims(tf.linspace(0.0, math.pi, self.filters, axis=0),axis=0)], n_channels, axis=1)
+
+        self.w = tf.Variable(
+            initial_value=self.sym_initializer(shape=(  
+                                                        n_channels,
+                                                        self.filters),
+                                 dtype='float32'), trainable=True , name="sym_param_c" )
+
         #self.scale = tf.Variable(0.0, trainable=True)                  
         #tf.Variable(0.01, trainable=True)
         self.w_a =  tf.Variable(initial_value=tf.stack([tf.concat( [a,b,c], axis=0) , 

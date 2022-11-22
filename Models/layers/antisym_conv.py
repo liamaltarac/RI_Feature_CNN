@@ -18,9 +18,9 @@ import math
 import matplotlib.pyplot as plt
 import sys 
 
-class SortedConv2D(tf.keras.layers.Layer):
+class AntiSymConv2D(tf.keras.layers.Layer):
     def __init__(self, filters, padding = 'VALID', strides = (1, 1), activation=None, use_bias = True):
-        super(SortedConv2D, self).__init__()
+        super(AntiSymConv2D, self).__init__()
         self.filters = filters
         self.kernel_size = (3,3)
         self.activation = activation
@@ -28,8 +28,8 @@ class SortedConv2D(tf.keras.layers.Layer):
         self.kernel_initializer = tf.keras.initializers.GlorotNormal(seed=5)
         self.param_initializer =tf.keras.initializers.GlorotNormal(seed=5)
         
-        self.sym_initializer = tf.keras.initializers.RandomUniform(
-                                    minval=-2, maxval=0.1, seed=5
+        self.sym_initializer = tf.keras.initializers.GlorotNormal(
+                                    seed=5
                                 )
         self.asym_initializer = tf.keras.initializers.RandomUniform(
                                     minval=-0.5, maxval=0.5, seed=5
@@ -54,7 +54,7 @@ class SortedConv2D(tf.keras.layers.Layer):
         self.scale = None
 
         self.map = None
-
+        self.n_channels = None
     def get_config(self):
         config = super().get_config()
         config.update({
@@ -67,42 +67,48 @@ class SortedConv2D(tf.keras.layers.Layer):
         return config
 
     def get_weights(self):
-        return self.w_a, self.bias
+        
+        
+        w_a =  tf.Variable(initial_value=tf.stack([tf.concat( [self.asym_param_a,self.asym_param_b,self.asym_param_c], axis=0) , 
+                              tf.concat( [self.asym_param_d,tf.zeros([1, self.n_channels, self.filters]), -self.asym_param_d], axis=0),
+                              tf.concat( [-self.asym_param_c, -self.asym_param_b, -self.asym_param_a], axis=0)]), trainable=True , name="asym_" )
+
+        return w_a, self.bias
     
 
     def build(self, input_shape):
-        *_, n_channels = input_shape
+        *_, self.n_channels = input_shape
 
         #####  BUILD Fa   ##### 
         #t = tf.random.normal([1, n_channels, self.filters], mean=tf.linspace(0.0, 2* math.pi,  self.filters, axis=0), stddev=100)
-        t = tf.repeat([tf.expand_dims(tf.linspace(0.0, 2*math.pi, self.filters, axis=0),axis=0)], n_channels, axis=1)
 
-        a = -tf.math.sqrt(8.0)*tf.math.cos(t - 9*math.pi/4)
-        b = -2*tf.math.sin(t)
-        c = -tf.math.sqrt(8.0)*tf.math.sin(t - 9*math.pi/4)
-        d = -2*tf.math.cos(t)
-        
         #self.scale = tf.Variable(0.0, trainable=True)                  
         #tf.Variable(0.01, trainable=True)
-        self.w_a =  tf.Variable(initial_value=tf.stack([tf.concat( [a,b,c], axis=0) , 
+        '''self.w_a =  tf.Variable(initial_value=tf.stack([tf.concat( [a,b,c], axis=0) , 
                               tf.concat( [d,tf.zeros([1, n_channels, self.filters]), -d], axis=0),
-                              tf.concat( [-c, -b, -a], axis=0)]), trainable=True , name="asym_" ) * tf.math.reduce_mean(self.kernel_initializer(shape=(1, n_channels, self.filters), dtype=tf.float32)) 
+                              tf.concat( [-c, -b, -a], axis=0)]), trainable=True , name="asym_" ) * tf.math.reduce_mean(self.kernel_initializer(shape=(1, n_channels, self.filters), dtype=tf.float32))''' 
         #####  BUILD Fs   ##### 
-        self.sym_param_a = tf.Variable(
+        self.asym_param_a = tf.Variable(
             initial_value=self.sym_initializer(shape=(1,
-                                                        n_channels,
+                                                        self.n_channels,
                                                         self.filters),
-                                 dtype='float32'), trainable=True , name="sym_param_a" )
-        self.sym_param_b = tf.Variable(
+                                 dtype='float32'), trainable=True , name="asym_param_a" )
+        self.asym_param_b = tf.Variable(
             initial_value=self.sym_initializer(shape=(1,
-                                                        n_channels,
+                                                        self.n_channels,
                                                         self.filters),
-                                 dtype='float32'), trainable=True , name="sym_param_b" )
-        self.sym_param_c = tf.Variable(
+                                 dtype='float32'), trainable=True , name="asym_param_b" )
+        self.asym_param_c = tf.Variable(
             initial_value=self.sym_initializer(shape=(1,
-                                                        n_channels,
+                                                        self.n_channels,
                                                         self.filters),
-                                 dtype='float32'), trainable=True , name="sym_param_c" )
+                                 dtype='float32'), trainable=True , name="asym_param_c" )
+
+        self.asym_param_d = tf.Variable(
+            initial_value=self.sym_initializer(shape=(1,
+                                                        self.n_channels,
+                                                        self.filters),
+                                 dtype='float32'), trainable=True , name="asym_param_d" )  
 
         '''self.w_s  = tf.stack([tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0), 
                                           tf.concat([self.sym_param_b, self.sym_param_c, self.sym_param_b], axis=0),
@@ -115,7 +121,6 @@ class SortedConv2D(tf.keras.layers.Layer):
                                                     dtype='float32'),
                 trainable=True, name="bias" )
 
-        self.scale_s = tf.Variable(initial_value=self.sym_initializer(shape=(1,)), trainable=True, name="scale_sym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
         #self.scale_a = tf.Variable(initial_value=self.asym_initializer(shape=(1,)), trainable=True, name="scale_asym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
             
         #self.scale_a = tf.Variable(self.gain_initializer(shape=(1,)), trainable=True, name="scale_asym")  #tf.Variable(initial_value=tf.math.abs(tf.reduce_mean(self.sym_param_a)) * 2.0, trainable=True) 
@@ -126,19 +131,18 @@ class SortedConv2D(tf.keras.layers.Layer):
 
     def call(self, inputs, training=None):
 
-        x_a =   tf.nn.conv2d(inputs, self.w_a , strides=self.strides, 
-                          padding=self.padding)
+
         
-        w_s  = tf.stack([tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0), 
-                              tf.concat([self.sym_param_b, self.sym_param_c, self.sym_param_b], axis=0),
-                              tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0)])
+        w_a =  tf.stack([tf.concat( [self.asym_param_a,self.asym_param_b,self.asym_param_c], axis=0) , 
+                              tf.concat( [self.asym_param_d,tf.zeros([1, self.n_channels, self.filters]), -self.asym_param_d], axis=0),
+                              tf.concat( [-self.asym_param_c, -self.asym_param_b, -self.asym_param_a], axis=0)])
+
+        x =   tf.nn.conv2d(inputs, w_a , strides=self.strides, 
+                          padding=self.padding)
 
         '''x =  tf.nn.conv2d(inputs, filters=  tf.math.scalar_mul(self.scale , tf.math.add(self.w_a, w_s))  , strides=self.strides, 
                           padding=self.padding)'''
 
-        x_s =   tf.nn.conv2d(inputs, w_s , strides=self.strides, 
-                          padding=self.padding)
-        x =  tf.math.add(x_a , x_s)
         if self.use_bias:
             #x_s = x_s + self.bias
             x = x+self.bias
@@ -146,19 +150,14 @@ class SortedConv2D(tf.keras.layers.Layer):
 
         #x_s = self.activation(x_s)
 
-        return  self.activation(x)  #self.activation(tf.math.add(x_a, x_s)) #, self.map
+        if self.activation :
+            return  self.activation(x)  #self.activation(tf.math.add(x_a, x_s)) #, self.map
+        else:
+            return x
         
     def get_scale(self):
         return self.scale
 
-    def get_asym_filter(self, channel, filter):
-        return self.w_a[:,:,channel,filter]
-    
-    def get_sym_filter(self, channel, filter):
-        ws = tf.stack([tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0), 
-                              tf.concat([self.sym_param_b, self.sym_param_c, self.sym_param_b], axis=0),
-                              tf.concat([self.sym_param_a, self.sym_param_b, self.sym_param_a], axis=0)])
-        return ws[:,:,channel,filter]
 
     def get_map(self):
         return self.map
