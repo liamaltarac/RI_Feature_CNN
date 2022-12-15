@@ -34,8 +34,8 @@ from tensorflow.keras.applications import VGG16
 
 from mayavi  import mlab 
 
-LAYER = 17
-FILTER = [1,2]# list(range(512))
+LAYER = 15
+FILTER = [29]# list(range(512))
 CHANNEL =  list(range(512))# [0, 100]
 
 
@@ -67,7 +67,7 @@ def getSobelAngle(f):
     s_h = sobel_h(f)
     s_v = sobel_v(f)
 
-    return np.abs(np.pi - (np.arctan2(s_h,s_v)+(np.pi/2)))
+    return np.arctan2(s_h,s_v)
 
 def getSymAntiSym(filter):
 
@@ -133,9 +133,9 @@ glyphs = dict()
 
 
 num_filters = filters.shape[-1]
-num_channels = len(CHANNEL)
+num_channels = filters.shape[-2] #len(CHANNEL)
 c = np.linspace(0, 255, 256)
-for i, channel in enumerate(CHANNEL):  # Each channel (ex R G B)
+for i in range(num_channels):  # Each channel (ex R G B)
     #print("i = ", i)
     z = np.array([])
     x = np.array([])
@@ -149,10 +149,10 @@ for i, channel in enumerate(CHANNEL):  # Each channel (ex R G B)
     for filter in FILTER: #each filter in that channel
 
         f = filters[:,:,:, filter]
-        f = f[:,:, channel]  
+        f = f[:,:, i]  
 
         sym, anti = getSymAntiSym(f) # getSymAntiSym(normalizeToOne(f))
-        sym_mag =.05 #np.linalg.norm(sym) 
+        sym_mag = np.linalg.norm(sym) 
         anti_mag = np.linalg.norm(anti) 
 
         theta = getSobelAngle(f)
@@ -167,7 +167,7 @@ for i, channel in enumerate(CHANNEL):  # Each channel (ex R G B)
         sym_list[i].append(sym)
         anti_list[i].append(anti)
     #print(spec(num_channels), i)
-    glyphs[i] = mlab.points3d(x, y, z,  color = spec(num_channels)[i], scale_factor=.005)
+    glyphs[i] = mlab.points3d(x, y, z,  color = spec(num_channels)[i], scale_factor=.01)
 
     zdata = np.append(zdata, z)
     ydata = np.append(ydata, y)
